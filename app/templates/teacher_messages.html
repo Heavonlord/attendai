@@ -1,0 +1,55 @@
+{% extends 'base.html' %}
+{% block title %}Parent Messages{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="fw-bold mb-0"><i class="bi bi-envelope me-2 text-primary"></i>Parent Messages</h2>
+        <p class="text-muted mb-0">{{ messages|length }} total messages</p>
+    </div>
+    <a href="{{ url_for('main.teacher_dashboard') }}" class="btn btn-outline-secondary btn-sm">← Dashboard</a>
+</div>
+
+{% if not messages %}
+<div class="card border-0 shadow-sm rounded-4 text-center py-5">
+    <div class="card-body">
+        <div class="fs-1 mb-3">📭</div>
+        <h5 class="text-muted">No messages from parents yet</h5>
+    </div>
+</div>
+{% else %}
+<div class="row g-3">
+    {% for msg in messages %}
+    <div class="col-12">
+        <div class="card border-0 shadow-sm rounded-4 {% if not msg.is_read %}border-primary border-opacity-50{% endif %}">
+            <div class="card-body p-4">
+                <div class="d-flex justify-content-between align-items-start mb-2">
+                    <div>
+                        <span class="fw-bold">{{ msg.sender.username }}</span>
+                        <span class="text-muted small ms-2">re: {{ msg.student.username }}</span>
+                        {% if msg.course %}<span class="badge bg-primary ms-1">{{ msg.course.code }}</span>{% endif %}
+                    </div>
+                    <small class="text-muted">{{ msg.created_at.strftime('%d %b, %I:%M %p') }}</small>
+                </div>
+                <p class="mb-3">{{ msg.message }}</p>
+
+                <!-- Reply form -->
+                <form method="POST" action="{{ url_for('main.teacher_reply_message') }}"
+                      class="d-flex gap-2">
+                    <input type="hidden" name="parent_id" value="{{ msg.sender_id }}">
+                    <input type="hidden" name="student_id" value="{{ msg.student_id }}">
+                    {% if msg.course_id %}
+                    <input type="hidden" name="course_id" value="{{ msg.course_id }}">
+                    {% endif %}
+                    <input type="text" name="message" class="form-control form-control-sm"
+                           placeholder="Reply to {{ msg.sender.username }}..." required>
+                    <button class="btn btn-primary btn-sm px-3">
+                        <i class="bi bi-reply me-1"></i>Reply
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

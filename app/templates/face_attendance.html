@@ -1,0 +1,475 @@
+{% extends 'base.html' %}
+{% block title %}Face Recognition — {{ course.code }}{% endblock %}
+
+{% block extra_css %}
+<style>
+#videoContainer {
+    position: relative;
+    border-radius: 16px;
+    overflow: hidden;
+    background: #000;
+    max-width: 640px;
+    margin: 0 auto;
+}
+#video { width: 100%; display: block; border-radius: 16px; }
+#scanOverlay {
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    pointer-events: none;
+}
+.scanning-line {
+    position: absolute; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, transparent, #28a745, transparent);
+    animation: scan 2s linear infinite;
+}
+@keyframes scan {
+    0%   { top: 0; opacity: 1; }
+    100% { top: 100%; opacity: 0.3; }
+}
+.face-box {
+    position: absolute;
+    border: 2px solid #28a745;
+    border-radius: 4px;
+    background: rgba(40,167,69,0.1);
+    color: white;
+    font-size: 0.7rem;
+    padding: 2px 6px;
+}
+.student-result-card {
+    border-radius: 12px;
+    border: 2px solid #e9ecef;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: border-color 0.3s, background 0.3s;
+}
+.student-result-card.matched {
+    border-color: #28a745;
+    background: #d4edda;
+    animation: popIn 0.4s ease;
+}
+.student-result-card.not-found {
+    border-color: #dee2e6;
+    background: #f8f9fa;
+    opacity: 0.6;
+}
+@keyframes popIn {
+    0%   { transform: scale(0.9); }
+    60%  { transform: scale(1.04); }
+    100% { transform: scale(1); }
+}
+.face-avatar {
+    width: 40px; height: 40px; border-radius: 50%;
+    background: linear-gradient(135deg, #1F3864, #2E75B6);
+    color: white; display: flex; align-items: center;
+    justify-content: center; font-weight: bold; font-size: 1rem;
+    flex-shrink: 0;
+}
+.progress-ring { transform: rotate(-90deg); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb mb-1">
+                <li class="breadcrumb-item"><a href="{{ url_for('main.teacher_dashboard') }}">Dashboard</a></li>
+                <li class="breadcrumb-item"><a href="{{ url_for('main.mark_attendance', course_id=course.id) }}">{{ course.code }}</a></li>
+                <li class="breadcrumb-item active">Face Recognition</li>
+            </ol>
+        </nav>
+        <h2 class="fw-bold mb-0"><i class="bi bi-person-bounding-box me-2 text-primary"></i>Face Recognition Attendance</h2>
+        <p class="text-muted mb-0">{{ course.name }} — {{ course.code }}</p>
+    </div>
+    <a href="{{ url_for('main.mark_attendance', course_id=course.id) }}" class="btn btn-outline-secondary btn-sm">
+        ← Manual Mode
+    </a>
+</div>
+
+<!-- Stats Bar -->
+<div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm rounded-4 text-center py-3">
+            <div class="h3 fw-bold text-primary mb-0">{{ total_enrolled }}</div>
+            <small class="text-muted">Enrolled</small>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm rounded-4 text-center py-3">
+            <div class="h3 fw-bold text-success mb-0">{{ registered_count }}</div>
+            <small class="text-muted">Faces Registered</small>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm rounded-4 text-center py-3">
+            <div class="h3 fw-bold text-warning mb-0" id="detectedCount">0</div>
+            <small class="text-muted">Detected</small>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm rounded-4 text-center py-3">
+            <div class="h3 fw-bold text-info mb-0" id="recognizedCount">0</div>
+            <small class="text-muted">Recognized</small>
+        </div>
+    </div>
+</div>
+
+{% if registered_count == 0 %}
+<div class="alert alert-warning rounded-4">
+    <i class="bi bi-exclamation-triangle me-2"></i>
+    <strong>No students have registered their faces yet.</strong>
+    Ask students to go to <strong>My Attendance → Register Face</strong> first.
+</div>
+{% endif %}
+
+<div class="row g-4">
+    <!-- Camera Panel -->
+    <div class="col-lg-7">
+        <div class="card border-0 shadow-sm rounded-4">
+            <div class="card-body p-4">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h6 class="fw-bold mb-0">Camera / Photo Input</h6>
+                    <div class="d-flex gap-2">
+                        <input type="date" id="attendanceDate" class="form-control form-control-sm"
+                               value="{{ today }}">
+                    </div>
+                </div>
+
+                <!-- Mode selector -->
+                <ul class="nav nav-pills nav-fill mb-3 gap-1" id="inputMode">
+                    <li class="nav-item">
+                        <button class="nav-link active" data-mode="live" onclick="setMode('live')">
+                            <i class="bi bi-camera-video me-1"></i>Live Camera
+                        </button>
+                    </li>
+                    <li class="nav-item">
+                        <button class="nav-link" data-mode="upload" onclick="setMode('upload')">
+                            <i class="bi bi-upload me-1"></i>Upload Photo
+                        </button>
+                    </li>
+                </ul>
+
+                <!-- Live Camera -->
+                <div id="liveSection">
+                    <div id="videoContainer" class="mb-3">
+                        <video id="video" autoplay playsinline muted></video>
+                        <div id="scanOverlay">
+                            <div class="scanning-line" id="scanLine" style="display:none"></div>
+                        </div>
+                    </div>
+                    <div class="d-flex gap-2 justify-content-center">
+                        <button class="btn btn-primary px-4" id="startCamBtn" onclick="startCamera()">
+                            <i class="bi bi-camera-video me-1"></i>Start Camera
+                        </button>
+                        <button class="btn btn-success px-4" id="captureBtn" onclick="captureAndRecognize()"
+                                style="display:none">
+                            <i class="bi bi-person-bounding-box me-1"></i>Recognize Faces
+                        </button>
+                        <button class="btn btn-outline-secondary" id="stopCamBtn" onclick="stopCamera()"
+                                style="display:none">
+                            Stop
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Upload Photo -->
+                <div id="uploadSection" style="display:none">
+                    <div class="border-2 border-dashed rounded-4 p-5 text-center mb-3" id="dropZone"
+                         ondrop="handleDrop(event)" ondragover="event.preventDefault()">
+                        <div class="fs-1 mb-2">🖼️</div>
+                        <p class="text-muted mb-2">Drag & drop a classroom photo here</p>
+                        <label class="btn btn-outline-primary btn-sm">
+                            <i class="bi bi-folder2-open me-1"></i>Choose Photo
+                            <input type="file" accept="image/*" hidden onchange="handleFileSelect(event)">
+                        </label>
+                    </div>
+                    <img id="uploadPreview" class="w-100 rounded-3 mb-3" style="display:none; max-height:300px; object-fit:contain">
+                    <button class="btn btn-success w-100" id="recognizeUploadBtn" onclick="recognizeUpload()"
+                            style="display:none">
+                        <i class="bi bi-person-bounding-box me-1"></i>Recognize Faces in Photo
+                    </button>
+                </div>
+
+                <!-- Processing indicator -->
+                <div id="processingSection" class="text-center py-3" style="display:none">
+                    <div class="spinner-border text-primary mb-2"></div>
+                    <p class="text-muted mb-0">Running DeepFace recognition...</p>
+                    <small class="text-muted">This may take 10–30 seconds on first run</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Results Panel -->
+    <div class="col-lg-5">
+        <div class="card border-0 shadow-sm rounded-4 h-100">
+            <div class="card-header bg-white border-0 pt-3 pb-0 px-4">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h6 class="fw-bold mb-0">Recognition Results</h6>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="resetResults()">
+                        <i class="bi bi-arrow-counterclockwise me-1"></i>Reset
+                    </button>
+                </div>
+            </div>
+            <div class="card-body px-4" style="max-height:500px; overflow-y:auto">
+                <div id="resultsList">
+                    <div class="text-center text-muted py-4" id="resultsEmpty">
+                        <div class="fs-2 mb-2">👥</div>
+                        Run recognition to see results
+                    </div>
+                </div>
+            </div>
+            <div class="card-footer bg-white border-0 px-4 pb-4" id="saveSection" style="display:none">
+                <button class="btn btn-success w-100 btn-lg rounded-3" onclick="saveAttendance()">
+                    <i class="bi bi-save me-2"></i>Save Attendance
+                    (<span id="matchCount">0</span> present)
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Unregistered Students Warning -->
+{% set unregistered = students | selectattr('face_registered', 'equalto', False) | list %}
+{% if unregistered %}
+<div class="card border-0 shadow-sm rounded-4 mt-4 border-warning border-opacity-50">
+    <div class="card-body px-4 py-3">
+        <h6 class="fw-bold mb-2"><i class="bi bi-exclamation-triangle text-warning me-2"></i>
+            {{ unregistered|length }} students haven't registered their face
+        </h6>
+        <div class="d-flex flex-wrap gap-2">
+            {% for s in unregistered %}
+            <span class="badge bg-light text-dark border">{{ s.username }} ({{ s.roll_no or 'N/A' }})</span>
+            {% endfor %}
+        </div>
+        <small class="text-muted d-block mt-2">These students won't be auto-recognized. Ask them to register at <strong>My Attendance → Register Face</strong>.</small>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Student data from server
+const enrolledStudents = {{ students_json | safe }};
+let stream = null;
+let currentMode = 'live';
+let uploadedImageData = null;
+let recognitionResults = {};
+
+function setMode(mode) {
+    currentMode = mode;
+    document.querySelectorAll('[data-mode]').forEach(b => {
+        b.classList.toggle('active', b.dataset.mode === mode);
+    });
+    document.getElementById('liveSection').style.display = mode === 'live' ? '' : 'none';
+    document.getElementById('uploadSection').style.display = mode === 'upload' ? '' : 'none';
+    if (mode === 'upload' && stream) stopCamera();
+}
+
+async function startCamera() {
+    try {
+        stream = await navigator.mediaDevices.getUserMedia({
+            video: { width: 640, height: 480, facingMode: 'environment' }
+        });
+        document.getElementById('video').srcObject = stream;
+        document.getElementById('startCamBtn').style.display = 'none';
+        document.getElementById('captureBtn').style.display = '';
+        document.getElementById('stopCamBtn').style.display = '';
+    } catch (err) {
+        alert('Camera access denied. Please use Upload Photo mode instead.');
+        setMode('upload');
+    }
+}
+
+function stopCamera() {
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+    document.getElementById('startCamBtn').style.display = '';
+    document.getElementById('captureBtn').style.display = 'none';
+    document.getElementById('stopCamBtn').style.display = 'none';
+}
+
+async function captureAndRecognize() {
+    const video = document.getElementById('video');
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    const imageData = canvas.toDataURL('image/jpeg', 0.9);
+    await runRecognition(imageData);
+}
+
+function handleDrop(e) {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file && file.type.startsWith('image/')) loadUploadedFile(file);
+}
+
+function handleFileSelect(e) {
+    const file = e.target.files[0];
+    if (file) loadUploadedFile(file);
+}
+
+function loadUploadedFile(file) {
+    const reader = new FileReader();
+    reader.onload = e => {
+        uploadedImageData = e.target.result;
+        const preview = document.getElementById('uploadPreview');
+        preview.src = uploadedImageData;
+        preview.style.display = '';
+        document.getElementById('recognizeUploadBtn').style.display = '';
+    };
+    reader.readAsDataURL(file);
+}
+
+async function recognizeUpload() {
+    if (!uploadedImageData) return;
+    await runRecognition(uploadedImageData);
+}
+
+async function runRecognition(imageData) {
+    document.getElementById('processingSection').style.display = '';
+    document.getElementById('scanLine').style.display = '';
+    document.getElementById('resultsEmpty').style.display = 'none';
+
+    try {
+        const response = await fetch('/api/face/recognize', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                image: imageData,
+                course_id: {{ course.id }},
+                date: document.getElementById('attendanceDate').value
+            })
+        });
+        const data = await response.json();
+
+        document.getElementById('processingSection').style.display = 'none';
+        document.getElementById('scanLine').style.display = 'none';
+
+        if (data.error) {
+            showError(data.error);
+            return;
+        }
+
+        displayResults(data);
+
+    } catch (err) {
+        document.getElementById('processingSection').style.display = 'none';
+        showError('Network error: ' + err.message);
+    }
+}
+
+function displayResults(data) {
+    document.getElementById('detectedCount').textContent = data.total_faces;
+    document.getElementById('recognizedCount').textContent = data.recognized.length;
+    document.getElementById('matchCount').textContent = data.recognized.length;
+
+    recognitionResults = {};
+    data.recognized.forEach(id => recognitionResults[id] = 'present');
+
+    const list = document.getElementById('resultsList');
+    list.innerHTML = '';
+
+    // Sort: matched first
+    const sorted = [...enrolledStudents].sort((a, b) => {
+        const aMatch = data.recognized.includes(a.id);
+        const bMatch = data.recognized.includes(b.id);
+        return bMatch - aMatch;
+    });
+
+    sorted.forEach(student => {
+        const matched = data.recognized.includes(student.id);
+        const detail = data.details.find(d => d.student_id === student.id);
+        const confidence = detail?.confidence || null;
+        const initials = student.name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0,2);
+
+        const card = document.createElement('div');
+        card.className = `student-result-card ${matched ? 'matched' : 'not-found'} mb-2`;
+        card.innerHTML = `
+            <div class="face-avatar">${initials}</div>
+            <div class="flex-grow-1">
+                <div class="fw-semibold">${student.name}</div>
+                <small class="text-muted">${student.roll_no || 'N/A'}</small>
+            </div>
+            <div class="text-end">
+                ${matched
+                    ? `<div class="badge bg-success">✅ Recognized</div>
+                       <div class="text-muted" style="font-size:0.7rem">${confidence ? confidence + '% match' : ''}</div>`
+                    : student.face_registered
+                        ? '<div class="badge bg-secondary">Not found</div>'
+                        : '<div class="badge bg-warning text-dark">No face data</div>'
+                }
+            </div>`;
+        list.appendChild(card);
+    });
+
+    document.getElementById('saveSection').style.display = data.recognized.length > 0 ? '' : 'none';
+
+    if (data.recognized.length === 0) {
+        list.innerHTML += `<div class="text-center text-muted py-3">
+            <i class="bi bi-emoji-frown fs-2"></i>
+            <p class="mt-2">No students recognized.<br>
+            <small>Try better lighting or a closer photo.</small></p>
+        </div>`;
+    }
+}
+
+function showError(msg) {
+    document.getElementById('resultsList').innerHTML = `
+        <div class="alert alert-danger rounded-3">
+            <i class="bi bi-exclamation-circle me-2"></i>${msg}
+        </div>`;
+}
+
+function resetResults() {
+    recognitionResults = {};
+    document.getElementById('resultsList').innerHTML = `
+        <div class="text-center text-muted py-4" id="resultsEmpty">
+            <div class="fs-2 mb-2">👥</div>Run recognition to see results
+        </div>`;
+    document.getElementById('saveSection').style.display = 'none';
+    document.getElementById('detectedCount').textContent = '0';
+    document.getElementById('recognizedCount').textContent = '0';
+}
+
+async function saveAttendance() {
+    const date = document.getElementById('attendanceDate').value;
+    if (!date) { alert('Please select a date.'); return; }
+
+    const btn = document.querySelector('#saveSection button');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Saving...';
+
+    try {
+        const response = await fetch('/api/face/save-attendance', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                course_id: {{ course.id }},
+                date: date,
+                recognized_ids: Object.keys(recognitionResults).map(Number)
+            })
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            btn.className = 'btn btn-outline-success w-100 btn-lg rounded-3';
+            btn.innerHTML = `✅ Saved! ${data.marked} students marked present`;
+            setTimeout(() => {
+                window.location.href = '/teacher/course/{{ course.id }}/analytics';
+            }, 2000);
+        } else {
+            btn.disabled = false;
+            btn.innerHTML = `<i class="bi bi-save me-2"></i>Save Attendance`;
+            alert('Error: ' + data.message);
+        }
+    } catch (err) {
+        btn.disabled = false;
+        btn.innerHTML = `<i class="bi bi-save me-2"></i>Save Attendance`;
+        alert('Network error. Please try again.');
+    }
+}
+</script>
+{% endblock %}

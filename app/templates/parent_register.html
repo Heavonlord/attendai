@@ -1,0 +1,48 @@
+{% extends 'base.html' %}
+{% block title %}Parent Registration{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+<div class="col-md-5">
+<div class="card border-0 shadow-sm rounded-4">
+    <div class="card-header bg-white border-0 rounded-top-4 pt-4 pb-0 px-4 text-center">
+        <div class="fs-1 mb-2">👨‍👩‍👧</div>
+        <h4 class="fw-bold mb-1">Parent Registration</h4>
+        <p class="text-muted mb-0">Create your parent account</p>
+    </div>
+    <div class="card-body p-4">
+        <form method="POST" action="{{ url_for('main.parent_register') }}">
+            <div class="mb-3">
+                <label class="form-label fw-semibold">Full Name</label>
+                <input type="text" name="username" class="form-control" placeholder="e.g. Rajesh Kumar" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label fw-semibold">Email Address</label>
+                <input type="email" name="email" class="form-control" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label fw-semibold">Phone Number</label>
+                <input type="text" name="phone" class="form-control" placeholder="+919876543210">
+            </div>
+            <div class="mb-3">
+                <label class="form-label fw-semibold">Password</label>
+                <input type="password" name="password" class="form-control" required minlength="6">
+            </div>
+            <div class="mb-3">
+                <label class="form-label fw-semibold">Child's Roll Number</label>
+                <input type="text" name="roll_no" class="form-control"
+                       placeholder="e.g. CS101" required>
+                <div class="form-text">Enter your child's roll number to link their account</div>
+            </div>
+            <button type="submit" class="btn btn-primary w-100 btn-lg rounded-3">
+                <i class="bi bi-person-check me-2"></i>Create Parent Account
+            </button>
+        </form>
+        <hr>
+        <p class="text-center text-muted small mb-0">
+            Already have an account? <a href="{{ url_for('main.login') }}">Login →</a>
+        </p>
+    </div>
+</div>
+</div>
+</div>
+{% endblock %}

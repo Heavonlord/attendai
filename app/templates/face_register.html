@@ -1,0 +1,341 @@
+{% extends 'base.html' %}
+{% block title %}Register Face{% endblock %}
+
+{% block extra_css %}
+<style>
+#videoContainer {
+    position: relative;
+    display: inline-block;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 8px 30px rgba(31,56,100,0.2);
+}
+#video {
+    width: 100%;
+    max-width: 480px;
+    display: block;
+    border-radius: 16px;
+}
+#overlay {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    pointer-events: none;
+}
+.face-guide {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 200px; height: 240px;
+    border: 3px dashed rgba(255,255,255,0.7);
+    border-radius: 50%;
+}
+.face-guide.detected {
+    border-color: #28a745;
+    border-style: solid;
+    animation: glow 1s ease-in-out infinite alternate;
+}
+@keyframes glow {
+    from { box-shadow: 0 0 5px #28a745; }
+    to   { box-shadow: 0 0 20px #28a745, inset 0 0 10px rgba(40,167,69,0.1); }
+}
+.capture-btn {
+    width: 70px; height: 70px;
+    border-radius: 50%;
+    background: white;
+    border: 4px solid #1F3864;
+    cursor: pointer;
+    transition: transform 0.15s;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.8rem;
+    margin: 0 auto;
+}
+.capture-btn:hover { transform: scale(1.08); }
+.capture-btn:active { transform: scale(0.95); }
+.sample-thumb {
+    width: 80px; height: 80px;
+    object-fit: cover;
+    border-radius: 10px;
+    border: 2px solid #28a745;
+}
+.step-badge {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: linear-gradient(135deg,#1F3864,#2E75B6);
+    color: white;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: bold; font-size: 0.9rem;
+    flex-shrink: 0;
+}
+.step-badge.done { background: #28a745; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+<div class="col-lg-8">
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="fw-bold mb-0"><i class="bi bi-camera-fill me-2 text-primary"></i>Face Registration</h2>
+        <p class="text-muted mb-0">Register your face for automatic attendance marking</p>
+    </div>
+    <a href="{{ url_for('main.student_dashboard') }}" class="btn btn-outline-secondary btn-sm">← Back</a>
+</div>
+
+{% if already_registered %}
+<div class="alert alert-success rounded-4 d-flex align-items-center gap-3">
+    <i class="bi bi-check-circle-fill fs-4"></i>
+    <div>
+        <strong>Face already registered!</strong> Your face data is saved.
+        You can re-register to update it, or delete it below.
+    </div>
+</div>
+{% endif %}
+
+<!-- Steps Guide -->
+<div class="card border-0 shadow-sm rounded-4 mb-4">
+    <div class="card-body p-4">
+        <h6 class="fw-bold mb-3">How it works</h6>
+        <div class="d-flex flex-column gap-3">
+            {% for step, text in [
+                ('1', 'Allow camera access when prompted'),
+                ('2', 'Position your face inside the oval guide'),
+                ('3', 'Capture 3 photos from slightly different angles'),
+                ('4', 'Your teacher can now mark you present automatically!')
+            ] %}
+            <div class="d-flex align-items-center gap-3">
+                <div class="step-badge {% if already_registered %}done{% endif %}">
+                    {% if already_registered %}<i class="bi bi-check-lg"></i>{% else %}{{ step }}{% endif %}
+                </div>
+                <span class="text-muted">{{ text }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<!-- Camera Section -->
+<div class="card border-0 shadow-sm rounded-4 mb-4">
+    <div class="card-body p-4 text-center">
+
+        <div id="startSection">
+            <div class="py-4">
+                <div class="fs-1 mb-3">📷</div>
+                <h5 class="fw-bold mb-2">Ready to register your face?</h5>
+                <p class="text-muted mb-4">Make sure you're in a well-lit area and facing the camera directly.</p>
+                <button class="btn btn-primary btn-lg px-5 rounded-pill" onclick="startCamera()">
+                    <i class="bi bi-camera-video me-2"></i>Start Camera
+                </button>
+            </div>
+        </div>
+
+        <div id="cameraSection" style="display:none">
+            <div id="videoContainer" class="mb-3">
+                <video id="video" autoplay playsinline muted></video>
+                <canvas id="overlay"></canvas>
+                <div class="face-guide" id="faceGuide"></div>
+            </div>
+
+            <div class="mb-3">
+                <div id="cameraStatus" class="text-muted mb-2">Position your face in the oval</div>
+                <div class="capture-btn" onclick="capturePhoto()" id="captureBtn" title="Capture photo">
+                    📸
+                </div>
+                <div class="text-muted small mt-2">
+                    <span id="captureCount">0</span>/3 photos captured
+                </div>
+            </div>
+
+            <!-- Captured thumbnails -->
+            <div class="d-flex justify-content-center gap-2 mb-3" id="thumbnails"></div>
+
+            <div id="submitSection" style="display:none">
+                <button class="btn btn-success btn-lg px-5 rounded-pill" onclick="submitFaces()" id="submitBtn">
+                    <i class="bi bi-check-circle me-2"></i>Save Face Data
+                </button>
+            </div>
+        </div>
+
+        <!-- Loading state -->
+        <div id="loadingSection" style="display:none" class="py-4">
+            <div class="spinner-border text-primary mb-3" style="width:3rem;height:3rem"></div>
+            <h5 class="fw-bold">Processing face data...</h5>
+            <p class="text-muted">Validating and saving your face images</p>
+        </div>
+
+        <!-- Result -->
+        <div id="resultSection" style="display:none" class="py-3">
+            <div id="resultIcon" class="fs-1 mb-2"></div>
+            <h5 class="fw-bold" id="resultTitle"></h5>
+            <p class="text-muted" id="resultMsg"></p>
+            <a href="{{ url_for('main.student_dashboard') }}" class="btn btn-primary rounded-pill px-4">
+                Go to Dashboard
+            </a>
+        </div>
+    </div>
+</div>
+
+<!-- Teacher registration panel -->
+{% if current_user.role == 'teacher' or current_user.role == 'admin' %}
+<div class="card border-0 shadow-sm rounded-4 mb-4 border-warning">
+    <div class="card-header bg-warning bg-opacity-10 border-0 rounded-top-4 pt-3 pb-0 px-4">
+        <h6 class="fw-bold mb-0"><i class="bi bi-person-badge me-2"></i>Register Face for a Student</h6>
+    </div>
+    <div class="card-body px-4 pb-4">
+        <p class="text-muted small mb-3">As a teacher, you can also register faces on behalf of students who aren't present.</p>
+        <div class="row g-3">
+            <div class="col-md-8">
+                <select class="form-select" id="targetStudentSelect">
+                    <option value="">Select a student...</option>
+                    {% for s in students %}
+                    <option value="{{ s.id }}">{{ s.username }} ({{ s.roll_no or 'N/A' }})
+                        {% if s.face_registered %}✅ Registered{% else %}⬜ Not registered{% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <button class="btn btn-warning w-100" onclick="registerForStudent()">
+                    <i class="bi bi-camera me-1"></i>Capture for Student
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Delete face data -->
+{% if already_registered %}
+<div class="card border-0 shadow-sm rounded-4 border-danger border-opacity-25">
+    <div class="card-body px-4 py-3 d-flex justify-content-between align-items-center">
+        <div>
+            <h6 class="fw-bold mb-0 text-danger">Delete Face Data</h6>
+            <small class="text-muted">Remove your registered face from the system</small>
+        </div>
+        <form method="POST" action="{{ url_for('main.delete_face_data') }}"
+              onsubmit="return confirm('Delete your face data? You will need to re-register.')">
+            <button class="btn btn-outline-danger btn-sm">
+                <i class="bi bi-trash me-1"></i>Delete
+            </button>
+        </form>
+    </div>
+</div>
+{% endif %}
+
+</div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let stream = null;
+let capturedPhotos = [];
+const MAX_PHOTOS = 3;
+let targetStudentId = {{ current_user.id }};
+
+async function startCamera() {
+    try {
+        stream = await navigator.mediaDevices.getUserMedia({
+            video: { width: 480, height: 360, facingMode: 'user' }
+        });
+        const video = document.getElementById('video');
+        video.srcObject = stream;
+        document.getElementById('startSection').style.display = 'none';
+        document.getElementById('cameraSection').style.display = '';
+        document.getElementById('cameraStatus').textContent = '✅ Camera ready — position your face in the oval';
+    } catch (err) {
+        alert('Camera access denied. Please allow camera access and try again.');
+    }
+}
+
+function capturePhoto() {
+    if (capturedPhotos.length >= MAX_PHOTOS) return;
+
+    const video = document.getElementById('video');
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+
+    capturedPhotos.push(dataUrl);
+
+    // Show thumbnail
+    const thumb = document.createElement('img');
+    thumb.src = dataUrl;
+    thumb.className = 'sample-thumb';
+    thumb.title = `Photo ${capturedPhotos.length}`;
+    document.getElementById('thumbnails').appendChild(thumb);
+
+    // Update counter
+    document.getElementById('captureCount').textContent = capturedPhotos.length;
+
+    // Flash effect
+    document.getElementById('faceGuide').classList.add('detected');
+    setTimeout(() => document.getElementById('faceGuide').classList.remove('detected'), 600);
+
+    // Status update
+    const remaining = MAX_PHOTOS - capturedPhotos.length;
+    if (remaining > 0) {
+        document.getElementById('cameraStatus').textContent =
+            `✅ Photo ${capturedPhotos.length} captured! ${remaining} more needed — slightly turn your head`;
+    } else {
+        document.getElementById('cameraStatus').textContent = '🎉 All photos captured! Click Save below.';
+        document.getElementById('submitSection').style.display = '';
+        document.getElementById('captureBtn').style.opacity = '0.4';
+        document.getElementById('captureBtn').style.pointerEvents = 'none';
+        // Stop camera
+        if (stream) stream.getTracks().forEach(t => t.stop());
+    }
+}
+
+function registerForStudent() {
+    const sel = document.getElementById('targetStudentSelect');
+    if (!sel.value) { alert('Please select a student first.'); return; }
+    targetStudentId = parseInt(sel.value);
+    startCamera();
+}
+
+async function submitFaces() {
+    if (capturedPhotos.length < MAX_PHOTOS) {
+        alert(`Please capture ${MAX_PHOTOS} photos first.`);
+        return;
+    }
+
+    document.getElementById('cameraSection').style.display = 'none';
+    document.getElementById('loadingSection').style.display = '';
+
+    try {
+        const response = await fetch('/api/face/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                student_id: targetStudentId,
+                images: capturedPhotos
+            })
+        });
+        const data = await response.json();
+
+        document.getElementById('loadingSection').style.display = 'none';
+        document.getElementById('resultSection').style.display = '';
+
+        if (data.success) {
+            document.getElementById('resultIcon').textContent = '✅';
+            document.getElementById('resultTitle').textContent = 'Face registered successfully!';
+            document.getElementById('resultMsg').textContent =
+                `${data.saved} photos saved. You can now be recognized automatically.`;
+        } else {
+            document.getElementById('resultIcon').textContent = '❌';
+            document.getElementById('resultTitle').textContent = 'Registration failed';
+            document.getElementById('resultMsg').textContent = data.message;
+        }
+    } catch (err) {
+        document.getElementById('loadingSection').style.display = 'none';
+        document.getElementById('resultSection').style.display = '';
+        document.getElementById('resultIcon').textContent = '❌';
+        document.getElementById('resultTitle').textContent = 'Network error';
+        document.getElementById('resultMsg').textContent = 'Please try again.';
+    }
+}
+</script>
+{% endblock %}
