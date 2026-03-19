@@ -18,7 +18,7 @@ def create_app(config_name='default'):
     db.init_app(app)
     login_manager.init_app(app)
     bcrypt.init_app(app)
-    socketio.init_app(app, cors_allowed_origins="*", async_mode='gevent')
+    socketio.init_app(app, cors_allowed_origins="*", async_mode='eventlet')
 
     login_manager.login_view = 'main.login'
     login_manager.login_message = 'Please log in to access this page.'
