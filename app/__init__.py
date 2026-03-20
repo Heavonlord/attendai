@@ -1,3 +1,4 @@
+import os
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
@@ -14,6 +15,9 @@ socketio = SocketIO()
 def create_app(config_name='default'):
     app = Flask(__name__)
     app.config.from_object(config[config_name])
+
+    # Ensure instance folder exists for SQLite
+    os.makedirs(os.path.join(app.root_path, '..', 'instance'), exist_ok=True)
 
     db.init_app(app)
     login_manager.init_app(app)
