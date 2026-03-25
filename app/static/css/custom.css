@@ -129,3 +129,117 @@ kbd { background: #2d3748; color: white; padding: 2px 6px; border-radius: 5px; f
 
 /* PWA install prompt */
 #installBanner { background: linear-gradient(135deg, var(--primary), var(--secondary)); color: white; padding: 12px 20px; border-radius: 12px; position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 9999; display: none; box-shadow: 0 8px 30px rgba(0,0,0,0.2); }
+
+/* ═══════════════════════════════════════
+   DARK MODE
+   ═══════════════════════════════════════ */
+[data-theme="dark"] {
+  --bg-light: #0f1117;
+  --card-bg: #1a1d27;
+  --border-color: #2d3148;
+  --text-primary: #e2e8f0;
+  --text-muted: #8892a4;
+  --shadow: 0 4px 20px rgba(0,0,0,0.4);
+  --input-bg: #1e2130;
+}
+
+[data-theme="dark"] body {
+  background: var(--bg-light);
+  color: var(--text-primary);
+}
+
+[data-theme="dark"] .card {
+  background: var(--card-bg) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-primary);
+}
+
+[data-theme="dark"] .card-header,
+[data-theme="dark"] .card-footer {
+  background: var(--card-bg) !important;
+  border-color: var(--border-color) !important;
+}
+
+[data-theme="dark"] .table {
+  color: var(--text-primary);
+  --bs-table-bg: transparent;
+  --bs-table-hover-bg: rgba(255,255,255,0.04);
+}
+
+[data-theme="dark"] .table-light,
+[data-theme="dark"] .table thead th {
+  background: #1e2130 !important;
+  color: var(--text-muted);
+  border-color: var(--border-color) !important;
+}
+
+[data-theme="dark"] .form-control,
+[data-theme="dark"] .form-select {
+  background: var(--input-bg);
+  border-color: var(--border-color);
+  color: var(--text-primary);
+}
+
+[data-theme="dark"] .form-control:focus,
+[data-theme="dark"] .form-select:focus {
+  background: var(--input-bg);
+  border-color: var(--secondary);
+  color: var(--text-primary);
+}
+
+[data-theme="dark"] .input-group-text {
+  background: #1e2130;
+  border-color: var(--border-color);
+  color: var(--text-muted);
+}
+
+[data-theme="dark"] .modal-content {
+  background: var(--card-bg);
+  color: var(--text-primary);
+}
+
+[data-theme="dark"] .modal-header,
+[data-theme="dark"] .modal-footer {
+  border-color: var(--border-color);
+}
+
+[data-theme="dark"] .bg-light {
+  background: #1e2130 !important;
+}
+
+[data-theme="dark"] .text-muted {
+  color: var(--text-muted) !important;
+}
+
+[data-theme="dark"] .alert-info    { background: #1a2a3a; color: #7ecff5; border-color: #1e3a50; }
+[data-theme="dark"] .alert-success { background: #1a2e1a; color: #6fcf97; border-color: #1e3a1e; }
+[data-theme="dark"] .alert-warning { background: #2e2a1a; color: #f2c94c; border-color: #3a341e; }
+[data-theme="dark"] .alert-danger  { background: #2e1a1a; color: #eb5757; border-color: #3a1e1e; }
+
+[data-theme="dark"] .nav-pills .nav-link:not(.active) {
+  color: var(--text-muted);
+}
+
+[data-theme="dark"] .badge.bg-light { background: #2d3148 !important; color: var(--text-primary) !important; }
+[data-theme="dark"] .border         { border-color: var(--border-color) !important; }
+[data-theme="dark"] .border-bottom  { border-color: var(--border-color) !important; }
+[data-theme="dark"] .dropdown-menu  { background: var(--card-bg); border-color: var(--border-color); }
+[data-theme="dark"] .dropdown-item  { color: var(--text-primary); }
+[data-theme="dark"] .dropdown-item:hover { background: rgba(255,255,255,0.06); }
+
+/* Dark mode toggle button */
+.dark-toggle {
+  background: none;
+  border: 1.5px solid rgba(255,255,255,0.3);
+  color: white;
+  border-radius: 20px;
+  padding: 4px 12px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.dark-toggle:hover { background: rgba(255,255,255,0.15); border-color: white; }
+

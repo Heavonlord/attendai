@@ -1,0 +1,170 @@
+{% extends 'base.html' %}
+{% block title %}GPS Check-in{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+#map { height: 280px; border-radius: 16px; }
+.checkin-btn {
+    width: 140px; height: 140px; border-radius: 50%;
+    background: linear-gradient(135deg, #1F3864, #2E75B6);
+    border: none; color: white; font-size: 2.5rem;
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column; cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+    box-shadow: 0 8px 30px rgba(31,56,100,0.3);
+    margin: 0 auto;
+}
+.checkin-btn:hover   { transform: scale(1.05); box-shadow: 0 12px 40px rgba(31,56,100,0.4); }
+.checkin-btn:active  { transform: scale(0.97); }
+.checkin-btn.success { background: linear-gradient(135deg, #28a745, #20c997); }
+.checkin-btn.error   { background: linear-gradient(135deg, #dc3545, #c82333); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+<div class="col-md-5">
+
+<div class="text-center mb-4">
+    <h2 class="fw-bold mb-0"><i class="bi bi-geo-alt-fill me-2 text-primary"></i>GPS Check-in</h2>
+    <p class="text-muted">Mark attendance by verifying your location</p>
+</div>
+
+{% if active_session %}
+<div class="card border-0 shadow-sm rounded-4 mb-4">
+    <div class="card-body p-4 text-center">
+        <div class="badge bg-success mb-3 px-3 py-2">
+            <i class="bi bi-broadcast me-1"></i>Active Session
+        </div>
+        <h5 class="fw-bold">{{ active_session.course_name }}</h5>
+        <p class="text-muted mb-4">Teacher has started a geofencing session. Check in now!</p>
+
+        <div id="map" class="mb-4" style="display:none"></div>
+
+        <button class="checkin-btn" id="checkinBtn" onclick="doCheckin()">
+            <span>📍</span>
+            <span style="font-size:0.85rem; font-weight:600; margin-top:6px">Check In</span>
+        </button>
+
+        <div id="checkinStatus" class="mt-4" style="display:none"></div>
+    </div>
+</div>
+{% else %}
+<div class="card border-0 shadow-sm rounded-4 text-center py-5">
+    <div class="card-body">
+        <div class="fs-1 mb-3">📡</div>
+        <h5 class="fw-bold mb-2">No Active Session</h5>
+        <p class="text-muted">Your teacher hasn't started a geofencing session yet.</p>
+        <p class="text-muted small">Ask your teacher to start a geofencing session from their dashboard.</p>
+        <a href="{{ url_for('main.student_dashboard') }}" class="btn btn-outline-primary btn-sm mt-2">
+            ← Back to Dashboard
+        </a>
+    </div>
+</div>
+{% endif %}
+
+</div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{% if active_session %}
+<script>
+const session = {{ active_session | tojson | safe }};
+let map, studentMarker, classroomCircle;
+
+function initMap(studentLat, studentLng) {
+    const mapEl = document.getElementById('map');
+    mapEl.style.display = '';
+    map = L.map('map').setView([session.lat, session.lng], 17);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+    // Classroom marker
+    L.marker([session.lat, session.lng]).addTo(map)
+        .bindPopup('🏫 Classroom').openPopup();
+    classroomCircle = L.circle([session.lat, session.lng], {
+        color: '#2E75B6', fillColor: '#2E75B6',
+        fillOpacity: 0.15, radius: session.radius
+    }).addTo(map);
+
+    // Student marker
+    if (studentLat) {
+        studentMarker = L.circleMarker([studentLat, studentLng], {
+            radius: 8, fillColor: '#28a745',
+            color: '#fff', fillOpacity: 0.9
+        }).addTo(map).bindPopup('📍 You');
+    }
+}
+
+function getDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371000;
+    const dLat = (lat2-lat1) * Math.PI/180;
+    const dLon = (lon2-lon1) * Math.PI/180;
+    const a = Math.sin(dLat/2)**2 +
+              Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLon/2)**2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+async function doCheckin() {
+    const btn = document.getElementById('checkinBtn');
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+    try {
+        const pos = await new Promise((res, rej) =>
+            navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: true }));
+
+        const { latitude, longitude } = pos.coords;
+        const dist = getDistance(latitude, longitude, session.lat, session.lng);
+        const inside = dist <= session.radius;
+
+        initMap(latitude, longitude);
+
+        // Send to server
+        const response = await fetch('/api/geo/student-checkin', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                course_id: session.course_id,
+                lat: latitude, lng: longitude,
+                distance: Math.round(dist),
+                inside: inside
+            })
+        });
+        const data = await response.json();
+
+        const statusEl = document.getElementById('checkinStatus');
+        statusEl.style.display = '';
+
+        if (inside) {
+            btn.className = 'checkin-btn success';
+            btn.innerHTML = '✅<span style="font-size:0.85rem;font-weight:600;margin-top:6px">Checked In!</span>';
+            statusEl.innerHTML = `
+                <div class="alert alert-success rounded-4">
+                    <strong>✅ Attendance Marked!</strong><br>
+                    You are <strong>${Math.round(dist)}m</strong> from the classroom.
+                    You're within the ${session.radius}m radius.
+                </div>`;
+        } else {
+            btn.className = 'checkin-btn error';
+            btn.innerHTML = '❌<span style="font-size:0.85rem;font-weight:600;margin-top:6px">Too Far!</span>';
+            statusEl.innerHTML = `
+                <div class="alert alert-danger rounded-4">
+                    <strong>❌ Too Far Away</strong><br>
+                    You are <strong>${Math.round(dist)}m</strong> from the classroom.
+                    Need to be within ${session.radius}m. Please move closer and try again.
+                </div>
+                <button class="btn btn-primary btn-sm" onclick="location.reload()">Try Again</button>`;
+        }
+
+    } catch (err) {
+        btn.className = 'checkin-btn error';
+        btn.innerHTML = '❌<span style="font-size:0.85rem;font-weight:600;margin-top:6px">GPS Error</span>';
+        document.getElementById('checkinStatus').innerHTML = `
+            <div class="alert alert-danger rounded-4">GPS access denied. Please allow location access.</div>`;
+    }
+}
+</script>
+{% endif %}
+{% endblock %}

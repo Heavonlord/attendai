@@ -1376,3 +1376,370 @@ def teacher_reply_message():
 
     return redirect(url_for('main.teacher_messages'))
 
+
+
+# ═══════════════════════════════════════════════════════════════
+# ADVANCED ANALYTICS ROUTES
+# ═══════════════════════════════════════════════════════════════
+
+@main.route('/admin/advanced-analytics')
+@login_required
+@role_required('admin')
+def advanced_analytics():
+    from datetime import timedelta
+    from collections import defaultdict
+
+    students = User.query.filter_by(role='student').all()
+    courses = Course.query.all()
+
+    # Risk counts
+    risk_counts = {'SAFE': 0, 'CAUTION': 0, 'WARNING': 0, 'CRITICAL': 0}
+    all_pcts = []
+    for s in students:
+        pct = s.get_attendance_percentage()
+        all_pcts.append({'student': s, 'pct': pct})
+        risk, _ = s.get_risk_level()
+        risk_counts[risk] += 1
+
+    all_pcts.sort(key=lambda x: x['pct'], reverse=True)
+    top_students = [{'username': x['student'].username,
+                     'roll_no': x['student'].roll_no, 'pct': x['pct']}
+                    for x in all_pcts[:5]]
+    bottom_students = [{'username': x['student'].username,
+                        'roll_no': x['student'].roll_no, 'pct': x['pct']}
+                       for x in all_pcts[-5:]]
+
+    avg_pct = round(sum(x['pct'] for x in all_pcts) / len(all_pcts), 1) if all_pcts else 0
+
+    # Today's classes
+    today_classes = Attendance.query.filter_by(date=date.today()).count()
+    at_risk = risk_counts['WARNING'] + risk_counts['CRITICAL']
+
+    # Daily trend (last 30 days)
+    trend_dates, trend_pcts = [], []
+    for i in range(29, -1, -1):
+        d = date.today() - timedelta(days=i)
+        if d.weekday() >= 5:
+            continue
+        records = Attendance.query.filter_by(date=d).all()
+        if records:
+            present = sum(1 for r in records if r.status in ('present', 'late'))
+            pct = round(present / len(records) * 100, 1)
+            trend_dates.append(d.strftime('%d %b'))
+            trend_pcts.append(pct)
+
+    # Course averages
+    course_names = [c.code for c in courses]
+    course_avgs = [c.get_avg_attendance() for c in courses]
+
+    # Weekday pattern
+    weekday_totals = defaultdict(list)
+    all_att = Attendance.query.filter(
+        Attendance.date >= date.today() - timedelta(days=30)).all()
+    for a in all_att:
+        wd = a.date.weekday()
+        if wd < 5:
+            weekday_totals[wd].append(1 if a.status in ('present', 'late') else 0)
+    weekday_avgs = []
+    for wd in range(5):
+        vals = weekday_totals[wd]
+        weekday_avgs.append(round(sum(vals) / len(vals) * 100, 1) if vals else 0)
+
+    # Heatmap
+    heatmap_data = []
+    for i in range(29, -1, -1):
+        d = date.today() - timedelta(days=i)
+        records = Attendance.query.filter_by(date=d).all()
+        if not records:
+            pct = 0
+            color = '#e9ecef'
+        else:
+            present = sum(1 for r in records if r.status in ('present', 'late'))
+            pct = round(present / len(records) * 100)
+            color = '#375623' if pct >= 80 else '#70ad47' if pct >= 60 else '#c6efce' if pct > 0 else '#e9ecef'
+        heatmap_data.append({
+            'date': d.strftime('%d %b'), 'day': d.day,
+            'pct': pct, 'color': color
+        })
+
+    stats = {
+        'students': len(students), 'avg_pct': avg_pct,
+        'at_risk': at_risk, 'today_classes': today_classes,
+        'risk': risk_counts
+    }
+    chart_data = {
+        'trend_dates': trend_dates, 'trend_pcts': trend_pcts,
+        'course_names': course_names, 'course_avgs': course_avgs,
+        'weekday_avgs': weekday_avgs
+    }
+
+    return render_template('advanced_analytics.html',
+                           stats=stats, chart_data=chart_data,
+                           heatmap_data=heatmap_data,
+                           top_students=top_students,
+                           bottom_students=bottom_students)
+
+
+# ═══════════════════════════════════════════════════════════════
+# GEOFENCING ROUTES
+# ═══════════════════════════════════════════════════════════════
+
+# In-memory store for active geo sessions (use Redis in production)
+_geo_sessions = {}
+
+
+@main.route('/teacher/course/<int:course_id>/geofencing')
+@login_required
+@role_required('teacher')
+def geofencing(course_id):
+    course = Course.query.get_or_404(course_id)
+    if course.teacher_id != current_user.id:
+        flash('Access denied.', 'danger')
+        return redirect(url_for('main.teacher_dashboard'))
+
+    enrolled_ids = [e.student_id for e in course.enrollments]
+    students = User.query.filter(User.id.in_(enrolled_ids)).order_by(User.roll_no).all()
+    students_json = json.dumps([{'id': s.id, 'name': s.username,
+                                  'roll_no': s.roll_no or 'N/A'} for s in students])
+
+    return render_template('geofencing.html', course=course,
+                           students=students, students_json=students_json,
+                           today=date.today().isoformat())
+
+
+@main.route('/student/geo-checkin')
+@login_required
+@role_required('student')
+def geo_checkin():
+    # Find active session for any of this student's courses
+    enrolled_ids = [e.course_id for e in Enrollment.query.filter_by(student_id=current_user.id).all()]
+    active_session = None
+    for cid in enrolled_ids:
+        if cid in _geo_sessions:
+            sess = _geo_sessions[cid]
+            course = Course.query.get(cid)
+            active_session = {
+                'course_id': cid,
+                'course_name': course.name if course else 'Unknown',
+                'lat': sess['lat'], 'lng': sess['lng'],
+                'radius': sess['radius']
+            }
+            break
+    return render_template('geo_checkin.html', active_session=active_session)
+
+
+@main.route('/api/geo/start-session', methods=['POST'])
+@login_required
+@role_required('teacher')
+def api_geo_start_session():
+    data = request.get_json()
+    course_id = data.get('course_id')
+    _geo_sessions[course_id] = {
+        'lat': data['lat'], 'lng': data['lng'],
+        'radius': data['radius'], 'date': data['date'],
+        'teacher_id': current_user.id
+    }
+    socketio.emit('geo_session_started', {
+        'course_id': course_id, 'lat': data['lat'],
+        'lng': data['lng'], 'radius': data['radius']
+    })
+    return jsonify({'success': True})
+
+
+@main.route('/api/geo/student-checkin', methods=['POST'])
+@login_required
+@role_required('student')
+def api_geo_student_checkin():
+    data = request.get_json()
+    course_id = data.get('course_id')
+    inside = data.get('inside', False)
+    lat = data.get('lat')
+    lng = data.get('lng')
+
+    if inside and course_id in _geo_sessions:
+        sess = _geo_sessions[course_id]
+        att_date = date.fromisoformat(sess['date'])
+        existing = Attendance.query.filter_by(
+            student_id=current_user.id, course_id=course_id, date=att_date).first()
+        if not existing:
+            db.session.add(Attendance(
+                student_id=current_user.id, course_id=course_id,
+                date=att_date, status='present'
+            ))
+            db.session.commit()
+
+    # Notify teacher's live dashboard
+    socketio.emit('geo_checkin', {
+        'student_id': current_user.id,
+        'student_name': current_user.username,
+        'roll_no': current_user.roll_no,
+        'inside': inside, 'lat': lat, 'lng': lng,
+        'course_id': course_id
+    }, room=f'course_{course_id}')
+
+    return jsonify({'success': True, 'inside': inside})
+
+
+@main.route('/api/geo/save-attendance', methods=['POST'])
+@login_required
+@role_required('teacher')
+def api_geo_save_attendance():
+    data = request.get_json()
+    course_id = data['course_id']
+    att_date = date.fromisoformat(data['date'])
+    present_ids = data.get('present_ids', [])
+
+    enrolled_ids = [e.student_id for e in Enrollment.query.filter_by(course_id=course_id).all()]
+    marked = 0
+    for sid in enrolled_ids:
+        status = 'present' if sid in present_ids else 'absent'
+        existing = Attendance.query.filter_by(
+            student_id=sid, course_id=course_id, date=att_date).first()
+        if existing:
+            existing.status = status
+        else:
+            db.session.add(Attendance(student_id=sid, course_id=course_id,
+                                      date=att_date, status=status))
+        if status == 'present':
+            marked += 1
+
+    db.session.commit()
+    if course_id in _geo_sessions:
+        del _geo_sessions[course_id]
+
+    return jsonify({'success': True, 'marked': marked})
+
+
+# ═══════════════════════════════════════════════════════════════
+# PDF REPORT ROUTES
+# ═══════════════════════════════════════════════════════════════
+
+@main.route('/teacher/course/<int:course_id>/pdf-report')
+@login_required
+@role_required('teacher')
+def pdf_report(course_id):
+    course = Course.query.get_or_404(course_id)
+    if course.teacher_id != current_user.id:
+        flash('Access denied.', 'danger')
+        return redirect(url_for('main.teacher_dashboard'))
+
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import cm
+        from reportlab.lib import colors
+        from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle,
+                                         Paragraph, Spacer, HRFlowable)
+        from reportlab.lib.enums import TA_CENTER, TA_LEFT
+
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4,
+                                rightMargin=2*cm, leftMargin=2*cm,
+                                topMargin=2*cm, bottomMargin=2*cm)
+
+        styles = getSampleStyleSheet()
+        story = []
+
+        # Title
+        title_style = ParagraphStyle('Title', parent=styles['Heading1'],
+                                      fontSize=20, textColor=colors.HexColor('#1F3864'),
+                                      alignment=TA_CENTER, spaceAfter=6)
+        sub_style = ParagraphStyle('Sub', parent=styles['Normal'],
+                                    fontSize=11, textColor=colors.grey,
+                                    alignment=TA_CENTER, spaceAfter=20)
+
+        story.append(Paragraph("AttendAI — Attendance Report", title_style))
+        story.append(Paragraph(f"{course.name} ({course.code})", sub_style))
+        story.append(Paragraph(f"Generated: {date.today().strftime('%d %B %Y')} | Teacher: {course.teacher.username}", sub_style))
+        story.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor('#1F3864')))
+        story.append(Spacer(1, 0.5*cm))
+
+        # Summary stats
+        students = course.get_enrolled_students()
+        total_classes = course.get_total_classes()
+        avg = course.get_avg_attendance()
+
+        risk_counts = {'SAFE': 0, 'CAUTION': 0, 'WARNING': 0, 'CRITICAL': 0}
+        for s in students:
+            risk, _ = s.get_risk_level(course_id)
+            risk_counts[risk] += 1
+
+        summary_data = [
+            ['Total Students', 'Total Classes', 'Avg Attendance', 'Safe', 'At Risk'],
+            [str(len(students)), str(total_classes), f'{avg}%',
+             str(risk_counts['SAFE']),
+             str(risk_counts['WARNING'] + risk_counts['CRITICAL'])]
+        ]
+        summary_table = Table(summary_data, colWidths=[3.2*cm]*5)
+        summary_table.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1F3864')),
+            ('TEXTCOLOR',  (0,0), (-1,0), colors.white),
+            ('FONTNAME',   (0,0), (-1,0), 'Helvetica-Bold'),
+            ('FONTSIZE',   (0,0), (-1,-1), 10),
+            ('ALIGN',      (0,0), (-1,-1), 'CENTER'),
+            ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.HexColor('#f0f4ff'), colors.white]),
+            ('GRID',       (0,0), (-1,-1), 0.5, colors.lightgrey),
+            ('TOPPADDING', (0,0), (-1,-1), 8),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 8),
+            ('ROUNDEDCORNERS', [4]),
+        ]))
+        story.append(summary_table)
+        story.append(Spacer(1, 0.8*cm))
+
+        # Student detail table
+        story.append(Paragraph("Student-wise Attendance", ParagraphStyle(
+            'H2', parent=styles['Heading2'], fontSize=13,
+            textColor=colors.HexColor('#1F3864'), spaceAfter=8)))
+
+        table_data = [['#', 'Student', 'Roll No', 'Present', 'Absent', '%', 'Risk']]
+        for i, s in enumerate(students, 1):
+            att_q = Attendance.query.filter_by(student_id=s.id, course_id=course_id)
+            total = att_q.count()
+            present = att_q.filter(Attendance.status.in_(['present', 'late'])).count()
+            absent = total - present
+            pct = round(present / total * 100, 1) if total > 0 else 0
+            risk, _ = s.get_risk_level(course_id)
+            table_data.append([str(i), s.username, s.roll_no or 'N/A',
+                                str(present), str(absent), f'{pct}%', risk])
+
+        col_widths = [1*cm, 4.5*cm, 2.5*cm, 2*cm, 2*cm, 2*cm, 2.5*cm]
+        detail_table = Table(table_data, colWidths=col_widths)
+
+        risk_colors = {
+            'SAFE': colors.HexColor('#d4edda'),
+            'CAUTION': colors.HexColor('#fff3cd'),
+            'WARNING': colors.HexColor('#fde5d4'),
+            'CRITICAL': colors.HexColor('#f8d7da')
+        }
+
+        style = [
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#2E75B6')),
+            ('TEXTCOLOR',  (0,0), (-1,0), colors.white),
+            ('FONTNAME',   (0,0), (-1,0), 'Helvetica-Bold'),
+            ('FONTSIZE',   (0,0), (-1,-1), 9),
+            ('ALIGN',      (0,0), (-1,-1), 'CENTER'),
+            ('ALIGN',      (1,0), (1,-1), 'LEFT'),
+            ('GRID',       (0,0), (-1,-1), 0.3, colors.lightgrey),
+            ('TOPPADDING', (0,0), (-1,-1), 6),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+            ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.HexColor('#f8f9fa'), colors.white]),
+        ]
+        # Color risk column
+        for row_idx, row in enumerate(table_data[1:], 1):
+            risk = row[6]
+            if risk in risk_colors:
+                style.append(('BACKGROUND', (6, row_idx), (6, row_idx), risk_colors[risk]))
+
+        detail_table.setStyle(TableStyle(style))
+        story.append(detail_table)
+
+        doc.build(story)
+        buffer.seek(0)
+        return send_file(buffer, mimetype='application/pdf',
+                         as_attachment=True,
+                         download_name=f'{course.code}_report_{date.today()}.pdf')
+
+    except ImportError:
+        flash('reportlab not installed. Run: pip install reportlab', 'danger')
+        return redirect(url_for('main.course_analytics', course_id=course_id))
+

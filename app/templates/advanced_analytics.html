@@ -1,0 +1,276 @@
+{% extends 'base.html' %}
+{% block title %}Advanced Analytics{% endblock %}
+
+{% block extra_css %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+<style>
+.metric-card { border-radius: 20px; border: none; transition: transform 0.2s; }
+.metric-card:hover { transform: translateY(-4px); }
+.chart-card { border-radius: 20px; border: none; }
+.trend-up   { color: #28a745; }
+.trend-down { color: #dc3545; }
+.heatmap-cell {
+    width: 28px; height: 28px; border-radius: 5px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 0.65rem; font-weight: 600; cursor: default;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="fw-bold mb-0"><i class="bi bi-graph-up-arrow me-2 text-primary"></i>Advanced Analytics</h2>
+        <p class="text-muted mb-0">System-wide insights and visualizations</p>
+    </div>
+    <div class="d-flex gap-2">
+        <select class="form-select form-select-sm w-auto" id="periodFilter" onchange="updateCharts()">
+            <option value="30">Last 30 days</option>
+            <option value="14">Last 14 days</option>
+            <option value="7">Last 7 days</option>
+        </select>
+        <a href="{{ url_for('main.admin_analytics') }}" class="btn btn-outline-secondary btn-sm">← Basic View</a>
+    </div>
+</div>
+
+<!-- KPI Row -->
+<div class="row g-3 mb-4">
+    {% for icon, color, bg, label, value, trend in [
+        ('bi-people-fill',      'white', '#1F3864',  'Total Students',    stats.students,   ''),
+        ('bi-bar-chart-fill',   'white', '#28a745',  'Avg Attendance',    stats.avg_pct|string + '%', ''),
+        ('bi-exclamation-triangle-fill', 'white', '#dc3545', 'At Risk',  stats.at_risk,    ''),
+        ('bi-calendar-check',   'white', '#2E75B6',  'Classes Today',     stats.today_classes, '')
+    ] %}
+    <div class="col-6 col-md-3">
+        <div class="card metric-card shadow-sm h-100" style="background: {{ bg }}; color: {{ color }}">
+            <div class="card-body py-4 text-center">
+                <i class="bi {{ icon }} fs-2 mb-2 d-block opacity-75"></i>
+                <div class="h2 fw-bold mb-0">{{ value }}</div>
+                <div class="opacity-75 small">{{ label }}</div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Charts Row 1 -->
+<div class="row g-4 mb-4">
+    <!-- Attendance trend line chart -->
+    <div class="col-lg-8">
+        <div class="card chart-card shadow-sm h-100">
+            <div class="card-body p-4">
+                <h6 class="fw-bold mb-3">📈 Daily Attendance Trend</h6>
+                <canvas id="trendChart" height="120"></canvas>
+            </div>
+        </div>
+    </div>
+    <!-- Risk donut -->
+    <div class="col-lg-4">
+        <div class="card chart-card shadow-sm h-100">
+            <div class="card-body p-4">
+                <h6 class="fw-bold mb-3">🎯 Risk Distribution</h6>
+                <canvas id="riskDonut" height="220"></canvas>
+                <div class="row g-2 mt-2 text-center">
+                    {% for label, color, count in [
+                        ('Safe', '#28a745', stats.risk.SAFE),
+                        ('Caution', '#ffc107', stats.risk.CAUTION),
+                        ('Warning', '#fd7e14', stats.risk.WARNING),
+                        ('Critical', '#dc3545', stats.risk.CRITICAL)
+                    ] %}
+                    <div class="col-6">
+                        <div class="fw-bold" style="color:{{ color }}">{{ count }}</div>
+                        <div class="text-muted" style="font-size:0.75rem">{{ label }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Charts Row 2 -->
+<div class="row g-4 mb-4">
+    <!-- Course comparison bar -->
+    <div class="col-lg-6">
+        <div class="card chart-card shadow-sm h-100">
+            <div class="card-body p-4">
+                <h6 class="fw-bold mb-3">📚 Course Performance Comparison</h6>
+                <canvas id="courseBar" height="200"></canvas>
+            </div>
+        </div>
+    </div>
+    <!-- Day-of-week pattern -->
+    <div class="col-lg-6">
+        <div class="card chart-card shadow-sm h-100">
+            <div class="card-body p-4">
+                <h6 class="fw-bold mb-3">📅 Attendance by Day of Week</h6>
+                <canvas id="weekdayChart" height="200"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Attendance Heatmap -->
+<div class="card chart-card shadow-sm mb-4">
+    <div class="card-body p-4">
+        <h6 class="fw-bold mb-3">🗓️ System-wide Attendance Heatmap (Last 30 Days)</h6>
+        <div class="d-flex gap-2 mb-3 align-items-center flex-wrap">
+            <span class="text-muted small">Low</span>
+            {% for color in ['#c6efce','#70ad47','#375623'] %}
+            <div style="width:20px;height:20px;background:{{ color }};border-radius:4px"></div>
+            {% endfor %}
+            <span class="text-muted small">High</span>
+            <span class="ms-3 text-muted small">Grey = no classes</span>
+        </div>
+        <div id="heatmapContainer" class="d-flex flex-wrap gap-1">
+            {% for day in heatmap_data %}
+            <div class="heatmap-cell"
+                 style="background: {{ day.color }}; color: {{ '#fff' if day.pct > 60 else '#333' }}"
+                 title="{{ day.date }}: {{ day.pct }}% attendance">
+                {{ day.day }}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<!-- Top & Bottom Students Table -->
+<div class="row g-4">
+    <div class="col-md-6">
+        <div class="card chart-card shadow-sm">
+            <div class="card-header bg-transparent border-0 pt-3 pb-0 px-4">
+                <h6 class="fw-bold mb-0 text-success">🏆 Top 5 Students</h6>
+            </div>
+            <div class="card-body px-4">
+                {% for s in top_students %}
+                <div class="d-flex align-items-center gap-3 py-2 border-bottom">
+                    <div class="fw-bold text-muted" style="width:20px">{{ loop.index }}</div>
+                    <div class="flex-grow-1">
+                        <div class="fw-semibold">{{ s.username }}</div>
+                        <small class="text-muted">{{ s.roll_no or 'N/A' }}</small>
+                    </div>
+                    <div class="text-end">
+                        <span class="badge bg-success">{{ s.pct }}%</span>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card chart-card shadow-sm">
+            <div class="card-header bg-transparent border-0 pt-3 pb-0 px-4">
+                <h6 class="fw-bold mb-0 text-danger">⚠️ Bottom 5 Students (Need Attention)</h6>
+            </div>
+            <div class="card-body px-4">
+                {% for s in bottom_students %}
+                <div class="d-flex align-items-center gap-3 py-2 border-bottom">
+                    <div class="fw-bold text-muted" style="width:20px">{{ loop.index }}</div>
+                    <div class="flex-grow-1">
+                        <div class="fw-semibold">{{ s.username }}</div>
+                        <small class="text-muted">{{ s.roll_no or 'N/A' }}</small>
+                    </div>
+                    <div class="text-end">
+                        <span class="badge bg-danger">{{ s.pct }}%</span>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const chartData = {{ chart_data | tojson | safe }};
+
+// ── Trend Chart ────────────────────────────────────────────
+const trendCtx = document.getElementById('trendChart');
+new Chart(trendCtx, {
+    type: 'line',
+    data: {
+        labels: chartData.trend_dates,
+        datasets: [{
+            label: 'Avg Attendance %',
+            data: chartData.trend_pcts,
+            borderColor: '#2E75B6',
+            backgroundColor: 'rgba(46,117,182,0.1)',
+            fill: true, tension: 0.4, pointRadius: 3,
+            pointBackgroundColor: '#2E75B6'
+        }, {
+            label: '75% Threshold',
+            data: chartData.trend_dates.map(() => 75),
+            borderColor: '#ffc107', borderDash: [6,3],
+            borderWidth: 2, pointRadius: 0, fill: false
+        }]
+    },
+    options: {
+        responsive: true,
+        scales: { y: { min: 0, max: 100, ticks: { callback: v => v + '%' } } },
+        plugins: { legend: { position: 'bottom' } }
+    }
+});
+
+// ── Risk Donut ─────────────────────────────────────────────
+new Chart(document.getElementById('riskDonut'), {
+    type: 'doughnut',
+    data: {
+        labels: ['Safe', 'Caution', 'Warning', 'Critical'],
+        datasets: [{
+            data: [{{ stats.risk.SAFE }}, {{ stats.risk.CAUTION }}, {{ stats.risk.WARNING }}, {{ stats.risk.CRITICAL }}],
+            backgroundColor: ['#28a745','#ffc107','#fd7e14','#dc3545'],
+            borderWidth: 0
+        }]
+    },
+    options: { cutout: '70%', plugins: { legend: { display: false } } }
+});
+
+// ── Course Bar ─────────────────────────────────────────────
+new Chart(document.getElementById('courseBar'), {
+    type: 'bar',
+    data: {
+        labels: chartData.course_names,
+        datasets: [{
+            label: 'Avg Attendance %',
+            data: chartData.course_avgs,
+            backgroundColor: chartData.course_avgs.map(v =>
+                v >= 80 ? '#28a745' : v >= 75 ? '#ffc107' : '#dc3545'),
+            borderRadius: 8
+        }]
+    },
+    options: {
+        responsive: true,
+        scales: { y: { beginAtZero: true, max: 100, ticks: { callback: v => v + '%' } } },
+        plugins: { legend: { display: false } }
+    }
+});
+
+// ── Weekday Chart ──────────────────────────────────────────
+new Chart(document.getElementById('weekdayChart'), {
+    type: 'radar',
+    data: {
+        labels: ['Monday','Tuesday','Wednesday','Thursday','Friday'],
+        datasets: [{
+            label: 'Avg Attendance %',
+            data: chartData.weekday_avgs,
+            backgroundColor: 'rgba(46,117,182,0.2)',
+            borderColor: '#2E75B6',
+            pointBackgroundColor: '#2E75B6'
+        }]
+    },
+    options: {
+        responsive: true,
+        scales: { r: { beginAtZero: true, max: 100 } },
+        plugins: { legend: { display: false } }
+    }
+});
+
+function updateCharts() {
+    // Could reload with period filter — for now just visual feedback
+    document.querySelectorAll('canvas').forEach(c => c.style.opacity = '0.6');
+    setTimeout(() => document.querySelectorAll('canvas').forEach(c => c.style.opacity = '1'), 500);
+}
+</script>
+{% endblock %}

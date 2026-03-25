@@ -1,0 +1,272 @@
+{% extends 'base.html' %}
+{% block title %}Geofencing — {{ course.code }}{% endblock %}
+
+{% block extra_css %}
+<style>
+#map { height: 350px; border-radius: 16px; overflow: hidden; }
+.geo-status { border-radius: 14px; padding: 16px 20px; text-align: center; }
+.pulse-ring {
+    position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 20px; height: 20px;
+    border-radius: 50%; background: #2E75B6;
+    animation: ripple 1.5s ease-out infinite;
+}
+@keyframes ripple {
+    0%   { box-shadow: 0 0 0 0 rgba(46,117,182,0.5); }
+    100% { box-shadow: 0 0 0 40px rgba(46,117,182,0); }
+}
+.student-geo-card {
+    border-radius: 12px; border: 2px solid #e9ecef;
+    padding: 10px 14px; transition: all 0.3s;
+}
+.student-geo-card.inside  { border-color: #28a745; background: #d4edda; }
+.student-geo-card.outside { border-color: #e9ecef; background: #f8f9fa; }
+</style>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb mb-1">
+                <li class="breadcrumb-item"><a href="{{ url_for('main.teacher_dashboard') }}">Dashboard</a></li>
+                <li class="breadcrumb-item active">Geofencing</li>
+            </ol>
+        </nav>
+        <h2 class="fw-bold mb-0"><i class="bi bi-geo-alt-fill me-2 text-primary"></i>Geofencing Attendance</h2>
+        <p class="text-muted mb-0">{{ course.name }} — {{ course.code }}</p>
+    </div>
+    <a href="{{ url_for('main.mark_attendance', course_id=course.id) }}" class="btn btn-outline-secondary btn-sm">← Manual Mode</a>
+</div>
+
+<div class="row g-4">
+    <!-- Map & Setup -->
+    <div class="col-lg-6">
+        <div class="card border-0 shadow-sm rounded-4">
+            <div class="card-body p-4">
+                <h6 class="fw-bold mb-3">📍 Set Classroom Location</h6>
+
+                <div id="map" class="mb-3"></div>
+
+                <div class="row g-2 mb-3">
+                    <div class="col-8">
+                        <label class="form-label small text-muted">Radius (meters)</label>
+                        <input type="range" class="form-range" id="radiusSlider"
+                               min="20" max="200" value="50" oninput="updateRadius()">
+                        <div class="text-center small text-muted">
+                            <span id="radiusVal">50</span>m radius
+                        </div>
+                    </div>
+                    <div class="col-4">
+                        <label class="form-label small text-muted">Date</label>
+                        <input type="date" class="form-control form-control-sm"
+                               id="geoDate" value="{{ today }}">
+                    </div>
+                </div>
+
+                <button class="btn btn-primary w-100 mb-2" onclick="getMyLocation()">
+                    <i class="bi bi-crosshair me-2"></i>Use My Current Location
+                </button>
+                <button class="btn btn-success w-100" id="startGeoBtn"
+                        onclick="startGeofencing()" disabled>
+                    <i class="bi bi-play-circle me-2"></i>Start Geofencing Session
+                </button>
+
+                <div id="locationStatus" class="geo-status bg-light mt-3" style="display:none">
+                    <div class="spinner-border spinner-border-sm text-primary me-2"></div>
+                    Getting location...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Student Check-in Panel -->
+    <div class="col-lg-6">
+        <div class="card border-0 shadow-sm rounded-4 h-100">
+            <div class="card-header bg-white border-0 pt-3 pb-0 px-4">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h6 class="fw-bold mb-0">👥 Student Check-ins</h6>
+                    <span class="badge bg-success" id="insideCount">0 inside</span>
+                </div>
+            </div>
+            <div class="card-body px-4" style="max-height: 420px; overflow-y: auto">
+                <div id="studentGeoList">
+                    {% for s in students %}
+                    <div class="student-geo-card outside mb-2" id="geo_{{ s.id }}">
+                        <div class="d-flex align-items-center gap-2">
+                            <div class="text-muted" id="geo_icon_{{ s.id }}">📍</div>
+                            <div class="flex-grow-1">
+                                <div class="fw-semibold">{{ s.username }}</div>
+                                <small class="text-muted">{{ s.roll_no or 'N/A' }}</small>
+                            </div>
+                            <span class="badge bg-secondary" id="geo_badge_{{ s.id }}">Waiting</span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="card-footer bg-white border-0 px-4 pb-4" id="geoSaveSection" style="display:none">
+                <button class="btn btn-success w-100 rounded-3" onclick="saveGeoAttendance()">
+                    <i class="bi bi-save me-2"></i>Save Attendance
+                    (<span id="geoMarkedCount">0</span> present)
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- How it works -->
+<div class="card border-0 shadow-sm rounded-4 mt-4">
+    <div class="card-body p-4">
+        <h6 class="fw-bold mb-3">ℹ️ How Geofencing Works</h6>
+        <div class="row g-3">
+            {% for step, text in [
+                ('1', 'Teacher clicks "Use My Current Location" to set the classroom center point'),
+                ('2', 'Set the radius (50-100m recommended for a classroom building)'),
+                ('3', 'Click "Start Geofencing Session" — students get a notification to check in'),
+                ('4', 'Students open the app and click "Check In with GPS" on their dashboard'),
+                ('5', 'System verifies their GPS coordinates are within the radius and marks them present')
+            ] %}
+            <div class="col-md-4 col-lg-2" style="min-width: 200px">
+                <div class="d-flex gap-2">
+                    <div class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center fw-bold flex-shrink-0"
+                         style="width:28px;height:28px;font-size:0.8rem">{{ step }}</div>
+                    <small class="text-muted">{{ text }}</small>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let map, marker, circle;
+let classroomLat = null, classroomLng = null;
+let radius = 50;
+const courseId = {{ course.id }};
+const students = {{ students_json | safe }};
+const insideStudents = new Set();
+
+// Init map
+map = L.map('map').setView([20.5937, 78.9629], 5);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap'
+}).addTo(map);
+
+function updateRadius() {
+    radius = parseInt(document.getElementById('radiusSlider').value);
+    document.getElementById('radiusVal').textContent = radius;
+    if (circle) circle.setRadius(radius);
+}
+
+function getMyLocation() {
+    const status = document.getElementById('locationStatus');
+    status.style.display = '';
+    status.innerHTML = '<div class="spinner-border spinner-border-sm text-primary me-2"></div>Getting your location...';
+
+    navigator.geolocation.getCurrentPosition(pos => {
+        classroomLat = pos.coords.latitude;
+        classroomLng = pos.coords.longitude;
+
+        map.setView([classroomLat, classroomLng], 17);
+
+        if (marker) map.removeLayer(marker);
+        if (circle) map.removeLayer(circle);
+
+        marker = L.marker([classroomLat, classroomLng]).addTo(map)
+            .bindPopup('📍 Classroom Location').openPopup();
+        circle = L.circle([classroomLat, classroomLng], {
+            color: '#2E75B6', fillColor: '#2E75B6',
+            fillOpacity: 0.15, radius: radius
+        }).addTo(map);
+
+        status.innerHTML = `✅ Location set: ${classroomLat.toFixed(5)}, ${classroomLng.toFixed(5)}`;
+        status.className = 'geo-status bg-success bg-opacity-10 text-success mt-3';
+        document.getElementById('startGeoBtn').disabled = false;
+
+    }, err => {
+        status.innerHTML = '❌ Location access denied. Please allow GPS.';
+        status.className = 'geo-status bg-danger bg-opacity-10 text-danger mt-3';
+    }, { enableHighAccuracy: true });
+}
+
+function startGeofencing() {
+    if (!classroomLat) return;
+    document.getElementById('startGeoBtn').innerHTML =
+        '<span class="spinner-border spinner-border-sm me-2"></span>Session Active...';
+    document.getElementById('startGeoBtn').disabled = true;
+    document.getElementById('geoSaveSection').style.display = '';
+
+    // Emit to WebSocket so students get notified
+    fetch('/api/geo/start-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            course_id: courseId,
+            lat: classroomLat, lng: classroomLng,
+            radius: radius,
+            date: document.getElementById('geoDate').value
+        })
+    }).then(r => r.json()).then(d => {
+        if (d.success) showToast('Geofencing session started! Students can now check in.', 'success');
+    });
+}
+
+// WebSocket: listen for student check-ins
+const socket = io();
+socket.emit('join_course', { course_id: courseId });
+
+socket.on('geo_checkin', data => {
+    const card = document.getElementById('geo_' + data.student_id);
+    const badge = document.getElementById('geo_badge_' + data.student_id);
+    const icon = document.getElementById('geo_icon_' + data.student_id);
+    if (!card) return;
+
+    if (data.inside) {
+        card.className = 'student-geo-card inside mb-2';
+        badge.className = 'badge bg-success';
+        badge.textContent = '✅ Inside';
+        icon.textContent = '✅';
+        insideStudents.add(data.student_id);
+
+        // Plot on map
+        if (data.lat && data.lng) {
+            L.circleMarker([data.lat, data.lng], {
+                radius: 6, fillColor: '#28a745',
+                color: '#fff', fillOpacity: 0.9
+            }).addTo(map).bindPopup(data.student_name);
+        }
+    } else {
+        badge.className = 'badge bg-warning text-dark';
+        badge.textContent = '⚠️ Outside';
+        icon.textContent = '⚠️';
+    }
+
+    document.getElementById('insideCount').textContent = insideStudents.size + ' inside';
+    document.getElementById('geoMarkedCount').textContent = insideStudents.size;
+});
+
+async function saveGeoAttendance() {
+    const date = document.getElementById('geoDate').value;
+    const res = await fetch('/api/geo/save-attendance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            course_id: courseId,
+            date: date,
+            present_ids: Array.from(insideStudents)
+        })
+    });
+    const data = await res.json();
+    if (data.success) {
+        showToast(`✅ Saved! ${data.marked} students marked present.`, 'success');
+        setTimeout(() => window.location.href = '/teacher/course/{{ course.id }}/analytics', 2000);
+    }
+}
+</script>
+{% endblock %}

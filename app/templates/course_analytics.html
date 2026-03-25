@@ -17,6 +17,9 @@
         <a href="{{ url_for('main.export_attendance', course_id=course.id) }}" class="btn btn-success btn-sm">
             <i class="bi bi-file-earmark-excel me-1"></i>Export Excel
         </a>
+        <a href="{{ url_for('main.pdf_report', course_id=course.id) }}" class="btn btn-danger btn-sm">
+            <i class="bi bi-file-earmark-pdf me-1"></i>PDF Report
+        </a>
         <a href="{{ url_for('main.mark_attendance', course_id=course.id) }}" class="btn btn-primary btn-sm">
             <i class="bi bi-pencil-square me-1"></i>Mark Attendance
         </a>

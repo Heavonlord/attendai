@@ -38,12 +38,14 @@
                     {% if current_user.role == 'admin' %}
                         <li class="nav-item"><a class="nav-link {% if request.endpoint == 'main.admin_dashboard' %}active{% endif %}" href="{{ url_for('main.admin_dashboard') }}"><i class="bi bi-speedometer2 me-1"></i>Dashboard</a></li>
                         <li class="nav-item"><a class="nav-link {% if request.endpoint == 'main.admin_analytics' %}active{% endif %}" href="{{ url_for('main.admin_analytics') }}"><i class="bi bi-graph-up me-1"></i>Analytics</a></li>
+                        <li class="nav-item"><a class="nav-link {% if request.endpoint == 'main.advanced_analytics' %}active{% endif %}" href="{{ url_for('main.advanced_analytics') }}"><i class="bi bi-bar-chart-line me-1"></i>Advanced</a></li>
                     {% elif current_user.role == 'teacher' %}
                         <li class="nav-item"><a class="nav-link {% if request.endpoint == 'main.teacher_dashboard' %}active{% endif %}" href="{{ url_for('main.teacher_dashboard') }}"><i class="bi bi-speedometer2 me-1"></i>Dashboard</a></li>
                         <li class="nav-item"><a class="nav-link {% if request.endpoint == 'main.teacher_messages' %}active{% endif %}" href="{{ url_for('main.teacher_messages') }}"><i class="bi bi-envelope me-1"></i>Messages</a></li>
                     {% elif current_user.role == 'student' %}
                         <li class="nav-item"><a class="nav-link {% if request.endpoint == 'main.student_dashboard' %}active{% endif %}" href="{{ url_for('main.student_dashboard') }}"><i class="bi bi-bar-chart-line me-1"></i>My Attendance</a></li>
                         <li class="nav-item"><a class="nav-link {% if request.endpoint == 'main.scan_qr' %}active{% endif %}" href="{{ url_for('main.scan_qr') }}"><i class="bi bi-qr-code-scan me-1"></i>Scan QR</a></li>
+                        <li class="nav-item"><a class="nav-link {% if request.endpoint == 'main.geo_checkin' %}active{% endif %}" href="{{ url_for('main.geo_checkin') }}"><i class="bi bi-geo-alt me-1"></i>GPS</a></li>
                     {% elif current_user.role == 'parent' %}
                         <li class="nav-item"><a class="nav-link {% if request.endpoint == 'main.parent_dashboard' %}active{% endif %}" href="{{ url_for('main.parent_dashboard') }}"><i class="bi bi-person-hearts me-1"></i>My Children</a></li>
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('main.parent_link_student') }}"><i class="bi bi-link-45deg me-1"></i>Link Child</a></li>
@@ -52,6 +54,12 @@
                 {% endif %}
             </ul>
             <ul class="navbar-nav ms-auto align-items-center">
+                <li class="nav-item me-2">
+                    <button class="dark-toggle" onclick="toggleDark()" id="darkBtn" title="Toggle dark mode">
+                        <span id="darkIcon">🌙</span>
+                        <span id="darkLabel">Dark</span>
+                    </button>
+                </li>
                 {% if current_user.is_authenticated %}
                     <li class="nav-item me-2">
                         <span class="badge role-badge-{{ current_user.role }}">
@@ -99,6 +107,24 @@
 <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
 <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<script>
+// ── Dark Mode ──────────────────────────────────────────────
+function toggleDark() {
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    setDark(!isDark);
+}
+function setDark(dark) {
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    document.getElementById('darkIcon').textContent = dark ? '☀️' : '🌙';
+    document.getElementById('darkLabel').textContent = dark ? 'Light' : 'Dark';
+    localStorage.setItem('attendai-theme', dark ? 'dark' : 'light');
+}
+// Load saved preference
+(function() {
+    const saved = localStorage.getItem('attendai-theme');
+    if (saved === 'dark') setDark(true);
+})();
+</script>
 {% block extra_js %}{% endblock %}
 </body>
 </html>
