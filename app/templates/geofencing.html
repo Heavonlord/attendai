@@ -3,7 +3,7 @@
 
 {% block extra_css %}
 <style>
-#map { height: 350px; border-radius: 16px; overflow: hidden; }
+#map { height: 350px; border-radius: 16px; overflow: hidden; background: #e9ecef; }
 .geo-status { border-radius: 14px; padding: 16px 20px; text-align: center; }
 .pulse-ring {
     position: absolute; top: 50%; left: 50%;
@@ -22,6 +22,9 @@
 }
 .student-geo-card.inside  { border-color: #28a745; background: #d4edda; }
 .student-geo-card.outside { border-color: #e9ecef; background: #f8f9fa; }
+/* Fix Leaflet z-index inside Bootstrap cards */
+.leaflet-pane { z-index: 1 !important; }
+.leaflet-top, .leaflet-bottom { z-index: 2 !important; }
 </style>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -145,6 +148,7 @@
 
 {% block extra_js %}
 <script>
+// Init map - wait for DOM ready and use setTimeout to ensure container has height
 let map, marker, circle;
 let classroomLat = null, classroomLng = null;
 let radius = 50;
@@ -152,11 +156,15 @@ const courseId = {{ course.id }};
 const students = {{ students_json | safe }};
 const insideStudents = new Set();
 
-// Init map
-map = L.map('map').setView([20.5937, 78.9629], 5);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap'
-}).addTo(map);
+document.addEventListener('DOMContentLoaded', function() {
+    map = L.map('map', { zoomControl: true }).setView([20.5937, 78.9629], 5);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors',
+        maxZoom: 19
+    }).addTo(map);
+    // Force map to recalculate size after render
+    setTimeout(() => map.invalidateSize(), 300);
+});
 
 function updateRadius() {
     radius = parseInt(document.getElementById('radiusSlider').value);
